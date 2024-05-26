@@ -3,6 +3,7 @@ import random
 from enum import Enum
 from collections import namedtuple
 import numpy as np
+import math
 
 pygame.init()
 font = pygame.font.SysFont('arial', 25)
@@ -24,6 +25,9 @@ BLACK = (0,0,0)
 
 BLOCK_SIZE = 20
 SPEED = 40
+
+GAME_OVER_REWARD = -40
+FOOD_REWARD = 30
 
 class SnakeGameAI:
 
@@ -49,6 +53,7 @@ class SnakeGameAI:
         self.score = 0
         self.food = None
         self._place_food()
+        self.food_distance = self.get_food_distance()
         self.frame_iteration = 0
 
 
@@ -58,6 +63,36 @@ class SnakeGameAI:
         self.food = Point(x, y)
         if self.food in self.snake:
             self._place_food()
+
+    def get_food_distance(self):
+        # get the distance between the current food and snake head
+        return math.ceil(math.hypot(self.head.x - self.food.x, self.head.y - self.food.y))
+    
+    def is_facing_food(self):
+        # returns true if the snake head is facing the food
+        is_facing = False
+
+        if  ((self.direction == Direction.LEFT and self.head.x > self.food.x) or
+            (self.direction == Direction.RIGHT and self.head.x < self.food.x) or
+            (self.direction == Direction.UP and self.head.y < self.food.y) or
+            (self.direction == Direction.DOWN and self.head.y > self.food.y)):
+                is_facing = True
+        
+        return is_facing
+
+    def distance_reward(self):
+        # calculate reward between distance of snake and food
+        reward = 0
+
+        food_distance = self.get_food_distance()
+        is_facing = self.is_facing_food()
+
+        if is_facing:
+            reward += 2
+        if self.food_distance > food_distance:
+            reward += 4
+
+        return reward
 
 
     def play_step(self, action):
@@ -77,17 +112,22 @@ class SnakeGameAI:
         game_over = False
         if self.is_collision() or self.frame_iteration > 100*len(self.snake):
             game_over = True
-            reward = -10
+            reward = GAME_OVER_REWARD
             return reward, game_over, self.score
 
         # 4. place new food or just move
         if self.head == self.food:
             self.score += 1
-            reward = 10
+            reward = FOOD_REWARD
             self._place_food()
         else:
             self.snake.pop()
-        
+
+        # 4.1. increase reward as snake gets closer to food
+        new_distance = self.get_food_distance()
+        reward = self.distance_reward()
+        self.food_distance = new_distance
+
         # 5. update ui and clock
         self._update_ui()
         self.clock.tick(SPEED)
