@@ -25,13 +25,18 @@ BLACK = (0,0,0)
 
 BLOCK_SIZE = 20
 SPEED = 40
+MOVE_LIMIT = 60
+DISTANCE_REWARD = 300
 
-GAME_OVER_REWARD = -40
-FOOD_REWARD = 30
+GAME_OVER_REWARD = -120
+FOOD_REWARD = 80
+
+SCREEN_WIDTH = 640
+SCREEN_HEIGHT = 480
 
 class SnakeGameAI:
 
-    def __init__(self, w=640, h=480):
+    def __init__(self, w=SCREEN_WIDTH, h=SCREEN_HEIGHT):
         self.w = w
         self.h = h
         # init display
@@ -39,6 +44,8 @@ class SnakeGameAI:
         pygame.display.set_caption('Snake')
         self.clock = pygame.time.Clock()
         self.reset()
+        self.food_distance = -1
+        self.move_limit = MOVE_LIMIT
 
 
     def reset(self):
@@ -55,6 +62,7 @@ class SnakeGameAI:
         self._place_food()
         self.food_distance = self.get_food_distance()
         self.frame_iteration = 0
+        self.move_limit = MOVE_LIMIT
 
 
     def _place_food(self):
@@ -80,17 +88,26 @@ class SnakeGameAI:
         
         return is_facing
 
-    def distance_reward(self):
+    def distance_reward(self, food_distance=None):
         # calculate reward between distance of snake and food
         reward = 0
 
-        food_distance = self.get_food_distance()
         is_facing = self.is_facing_food()
+        head_food_distance = food_distance - self.food_distance
 
         if is_facing:
             reward += 2
-        if self.food_distance > food_distance:
-            reward += 4
+        
+        # reward += math.ceil(DISTANCE_REWARD / food_distance)
+
+        if head_food_distance < 3:
+            reward += 5
+        elif head_food_distance < 5:
+            reward += 3
+        elif head_food_distance < 10:
+            reward += 1
+        else:
+            reward -= 1
 
         return reward
 
@@ -118,14 +135,16 @@ class SnakeGameAI:
         # 4. place new food or just move
         if self.head == self.food:
             self.score += 1
-            reward = FOOD_REWARD
+            self.move_limit = MOVE_LIMIT
+            reward += FOOD_REWARD
             self._place_food()
         else:
             self.snake.pop()
 
         # 4.1. increase reward as snake gets closer to food
         new_distance = self.get_food_distance()
-        reward = self.distance_reward()
+        reward += self.distance_reward(new_distance) + self.caluclate_collision_reward()
+        # reward += self.update_moves_counter()
         self.food_distance = new_distance
 
         # 5. update ui and clock
@@ -147,6 +166,46 @@ class SnakeGameAI:
 
         return False
 
+    def get_collision_distance(self):
+        # get the distance between snake head and nearest collision point
+
+        direction = self.direction
+        axis = 0 if direction in [Direction.RIGHT, Direction.LEFT] else 1
+        increment = BLOCK_SIZE if direction in [Direction.RIGHT, Direction.DOWN] else -1 * BLOCK_SIZE
+        block = Point(self.head.x, self.head.y)
+        distance = 0
+
+        while not self.is_collision(block):
+            distance += 1
+            if axis == 0:
+                block = Point(block.x + increment, block.y)
+            else:
+                block = Point(block.x, block.y + increment)
+        
+        return distance
+    
+    def caluclate_collision_reward(self):
+        # calculate reward based on collision distance
+        reward = 0
+        collision_distance = self.get_collision_distance()
+
+        if collision_distance < 3:
+            reward = -5
+        elif collision_distance < 5:
+            reward = -3
+        elif collision_distance < 10:
+            reward = -1
+        else:
+            reward = 1
+
+        return reward
+
+
+    def update_moves_counter(self):
+        # update the number of moves left
+        self.move_limit -= 1
+
+        return max(min(self.move_limit, 0), -5)
 
     def _update_ui(self):
         self.display.fill(BLACK)

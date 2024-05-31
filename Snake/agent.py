@@ -132,6 +132,8 @@ def train():
 
         # remember last move
         agent.remember(state_old, last_move, reward, state_new, game_over)
+        
+        print("Move Reward: ", reward)
 
         # train long memory, plot result
         if game_over:
