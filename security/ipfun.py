@@ -1,8 +1,6 @@
 import socket
 import scapy.all as scapy
 
-conf.use_pcap = True
-
 def get_ip_from_host(host: str):
     ''' Return (hostname, aliases, ipaddrlist) from host name. Supports ipv4 only.'''
     try:
@@ -17,8 +15,7 @@ def get_ip_from_host(host: str):
 
 def host_traffic():
     ''' Returns the traffic of the host. '''
-    packets = scapy.sniff(count=10)
-    return packets
+    packets = scapy.sniff()
+    packets.summary()
 
-print(host_traffic())
-
+host_traffic()
