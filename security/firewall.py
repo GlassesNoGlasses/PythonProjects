@@ -1,6 +1,7 @@
 import socket
 import scapy.all as scapy
 import pandas as pd
+import numpy as np
 from ipaddress import ip_address
 
 CSV_FIELDS = ['host', 'aliases', 'ips', 'inbound', 'outbound', 'protocol']
@@ -56,7 +57,10 @@ class FirewallConfig():
         if not filtered_ips:
             return False
         
-        pd.concat(self.config, pd.DataFrame([host, aliases, filtered_ips, inbound, outbound, protocol], columns=CSV_FIELDS))
+        next_index = 0 if pd.isnull(self.config.index.max()) else self.config.index.max() + 1
+
+        self.config.loc[next_index] = [host, aliases, filtered_ips, inbound, outbound, protocol]
+        print(self.config)
         
         if self.autosave:
             self.save_config()
