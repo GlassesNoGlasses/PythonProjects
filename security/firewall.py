@@ -1,6 +1,7 @@
 import socket
 import scapy.all as scapy
 import pandas as pd
+from ast import literal_eval
 from ipaddress import ip_address
 
 # csv file config
@@ -11,6 +12,14 @@ scapy.load_layer("http")
 scapy.load_layer("tls")
 scapy.load_layer("dns")
 
+# protocols
+PROTOCOLS = {
+    'tcp': scapy.TCP, 
+    'udp': scapy.UDP, 
+    'icmp': scapy.ICMP, 
+    'dns': scapy.DNS, 
+}
+
 class FirewallConfig():
     
     def __init__(self, csv_path: str, ip_addr: str, autosave: bool = True) -> None:
@@ -20,8 +29,8 @@ class FirewallConfig():
         # store configuration of the firewall
         self.config = pd.DataFrame(columns=CSV_FIELDS)
 
-        # cache frequent ip addresses for inbound/outbound allowance
-        self.cache = {'inbound': [], 'outbound': []}
+        # blocked_cache frequent ip addresses for inbound/outbound allowance
+        self.blocked_cache = {'inbound': [], 'outbound': []}
 
         # default settings for the firewall
         self.default = {'inbound': True, 'outbound': True, 'protocol': None}
@@ -64,6 +73,14 @@ class FirewallConfig():
         if (self.config.empty):
             return False
         
+        # convert string of lists to literal lists
+        self.config.loc[:, 'ips'] = self.config['ips'].apply(literal_eval)
+        self.config.loc[:, 'aliases'] = self.config['aliases'].apply(literal_eval)
+
+        # update blocked_cache
+        self.blocked_cache['inbound'] = self.config[self.config['inbound'] == False]['ips']
+        self.blocked_cache['outbound'] = self.config[self.config['outbound'] == False]['ips']
+        
         return True
 
 
@@ -77,9 +94,9 @@ class FirewallConfig():
         if not filtered_ips or not host:
             return False
 
-        inbound = inbound if inbound else self.default['inbound']
-        outbound = outbound if outbound else self.default['outbound']
-        protocol = protocol if protocol else self.default['protocol']
+        inbound = inbound if inbound is not None else self.default['inbound']
+        outbound = outbound if outbound is not None else self.default['outbound']
+        protocol = PROTOCOLS[protocol] if protocol and protocol.lower() in PROTOCOLS.keys() else self.default['protocol']
         
         # existing host in the configuration
         if host in self.config['host'].values:
@@ -90,9 +107,9 @@ class FirewallConfig():
         # add to config
         self.config.loc[index, CSV_FIELDS] = [host, aliases, filtered_ips, inbound, outbound, protocol]
 
-        # add to cache
-        self.cache['inbound'] += filtered_ips if inbound else []
-        self.cache['outbound'] += filtered_ips if outbound else []
+        # add to blocked_cache
+        self.blocked_cache['inbound'] += filtered_ips if not inbound else []
+        self.blocked_cache['outbound'] += filtered_ips if not outbound else []
         
         if self.autosave:
             self.save_config()
@@ -116,10 +133,7 @@ class FirewallConfig():
     def packet_filter(self, packet) -> bool:
         ''' Filter packets. '''
 
-        # want only tcp/udp packets for network traffic
-        is_traffic = packet.haslayer(scapy.TCP) or packet.haslayer(scapy.UDP)
-
-        if (not is_traffic):
+        if (not packet.haslayer(scapy.IP)):
             return False
 
         # filter packets based on current machines ip address src/dst
@@ -127,21 +141,25 @@ class FirewallConfig():
         dip = packet[IPv6].dst if (IPv6 in packet) else packet[IP].dst
 
         is_user = sip == self.ip_addr or dip == self.ip_addr
+        in_firewall = sip in self.blocked_cache['inbound'] or dip in self.blocked_cache['outbound']
+        print(self.blocked_cache)
+        print(in_firewall, dip, sip)
 
         # print("Packet is allowed.") if is_traffic and is_user else print("Packet is blocked.")
 
-        return is_traffic and is_user
+        return in_firewall and is_user
 
 
 
     def packet_prn(self, packet) -> None:
-        ''' Perform actions on packets. '''
+        ''' Perform actions on packets from blocked inbound/outpound configs. '''
+
 
         if packet.haslayer(scapy.IP):
             sip = packet[IPv6].src if (IPv6 in packet) else packet[IP].src
             dip = packet[IPv6].dst if (IPv6 in packet) else packet[IP].dst
 
-            if sip in self.cache['inbound']:
+            if sip in self.blocked_cache['inbound']:
                 print(f"Packet from {sip} is blocked.")
                 return
             elif dip in self.config['outbound']:
@@ -221,11 +239,10 @@ def main():
     manga4life, manga4life_aliases, manga4life_ips = firewall.get_ip_from_host('www.manga4life.com')
 
     # firewall.add_firewall(google, google_aliases, google_ips)
-    # firewall.add_firewall(manga4life, manga4life_aliases, manga4life_ips)
-    # firewall.add_firewall(google, google_aliases, google_ips, protocol='tcp')
+    firewall.add_firewall(manga4life, manga4life_aliases, manga4life_ips, outbound=False, inbound=False)
+    firewall.add_firewall(google, google_aliases, google_ips, protocol='tcp')
 
-
-    # firewall.show_firewall()
+    firewall.show_firewall()
     firewall.run(count=10)
 
 main()
