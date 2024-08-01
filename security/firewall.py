@@ -53,13 +53,19 @@ class FirewallConfig():
         ''' Update the configuration. '''
 
         filtered_ips = self.filter_ips(ips)
+        index = -1
 
         if not filtered_ips:
             return False
-        
-        next_index = 0 if pd.isnull(self.config.index.max()) else self.config.index.max() + 1
 
-        self.config.loc[next_index] = [host, aliases, filtered_ips, inbound, outbound, protocol]
+        # existing host in the configuration
+        if host in self.config['host'].values:
+            index = self.config[self.config['host'] == host].index
+        else:
+            index = 0 if pd.isnull(self.config.index.max()) else self.config.index.max() + 1
+
+        
+        self.config.loc[index] = [host, aliases, filtered_ips, inbound, outbound, protocol]
         print(self.config)
         
         if self.autosave:
@@ -83,11 +89,22 @@ class FirewallConfig():
 
 class Firewall():
 
-    def __init__(self, ip_addr: str = "0.0.0.0", auto_save: bool = True, csv_file: str = "./firewall.csv") -> None:
+    def __init__(self, ip_addr = None, auto_save: bool = True, csv_file: str = "./firewall.csv") -> None:
 
-        self.config = FirewallConfig(autosave=auto_save, csv_file=csv_file)
-        self.ip_addr = ip_addr
+        self.fw_config = FirewallConfig(autosave=auto_save, csv_file=csv_file)
+        self.ip_addr = ip_addr if ip_addr else self.initialize_ip()
         self.csv_file = csv_file
+    
+    
+    def initialize_ip(self) -> str:
+        ''' Initialize and fetch for the current machine's ip address. '''
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+
+        return ip
     
 
     def get_ip_from_host(self, host: str):
@@ -114,23 +131,26 @@ class Firewall():
         except AttributeError:
             return False
 
-        return self.config.update_config(host, aliases, ips, inbound, outbound, protocol)
+        return self.fw_config.update_config(host, aliases, ips, inbound, outbound, protocol)
     
     def show_firewalls(self) -> dict:
         ''' Show the firewall configuration. '''
-        return self.config.config
+
+        return self.fw_config.config
 
 
 def main():
     firewall = Firewall()
     print(firewall.ip_addr)
-    google, google_aliases, google_ips = firewall.get_ip_from_host('www.google.com')
-    manga4life, manga4life_aliases, manga4life_ips = firewall.get_ip_from_host('www.manga4life.com')
+    # google, google_aliases, google_ips = firewall.get_ip_from_host('www.google.com')
+    # manga4life, manga4life_aliases, manga4life_ips = firewall.get_ip_from_host('www.manga4life.com')
 
-    firewall.add_firewall(google, google_aliases, google_ips)
-    firewall.add_firewall(manga4life, manga4life_aliases, manga4life_ips)
+    # firewall.add_firewall(google, google_aliases, google_ips)
+    # firewall.add_firewall(manga4life, manga4life_aliases, manga4life_ips)
+    # firewall.add_firewall(google, google_aliases, google_ips)
 
-    firewall.show_firewalls()
+
+    # firewall.show_firewalls()
 
 main()
 
