@@ -1,3 +1,5 @@
 
 # ignore openAI cause I need to pay ;-;
 /openai-env
+
+/security/firewall.csv
