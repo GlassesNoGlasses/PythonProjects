@@ -17,7 +17,8 @@ PROTOCOLS = {
     'tcp': scapy.TCP, 
     'udp': scapy.UDP, 
     'icmp': scapy.ICMP, 
-    'dns': scapy.DNS, 
+    'dns': scapy.DNS,
+    "all": True,
 }
 
 class FirewallConfig():
@@ -33,7 +34,7 @@ class FirewallConfig():
         self.blocked_cache = {'inbound': [], 'outbound': []}
 
         # default settings for the firewall
-        self.default = {'inbound': True, 'outbound': True, 'protocol': None}
+        self.default = {'inbound': True, 'outbound': True, 'protocol': 'all'}
 
         # csv file path to save configuration
         self.csv_path = csv_path
@@ -57,6 +58,12 @@ class FirewallConfig():
     def filter_ips(self, ips: list[str]) -> list[str]:
         ''' Filter out invalid ip addresses. '''
         return [ip for ip in ips if self.validIPAddress(ip)]
+    
+
+    # def ip_to_host(self, ip: str) -> str | None:
+    #     ''' Convert ip address to host name. '''
+    #     host = self.config[ip in self.config['ips']]['host'].values[0]
+    #     return host if host else None
     
 
     def save_config(self) -> None:
@@ -94,6 +101,7 @@ class FirewallConfig():
         if not filtered_ips or not host:
             return False
 
+        # set default values
         inbound = inbound if inbound is not None else self.default['inbound']
         outbound = outbound if outbound is not None else self.default['outbound']
         protocol = PROTOCOLS[protocol] if protocol and protocol.lower() in PROTOCOLS.keys() else self.default['protocol']
@@ -123,6 +131,7 @@ class FirewallConfig():
 
         if self.autosave:
             self.save_config()
+
     
     def show_config(self, count: None | int = None) -> dict:
         ''' Show the configuration. '''
@@ -140,14 +149,20 @@ class FirewallConfig():
         sip = packet[IPv6].src if (IPv6 in packet) else packet[IP].src
         dip = packet[IPv6].dst if (IPv6 in packet) else packet[IP].dst
 
-        is_user = sip == self.ip_addr or dip == self.ip_addr
         in_firewall = sip in self.blocked_cache['inbound'] or dip in self.blocked_cache['outbound']
-        print(self.blocked_cache)
-        print(in_firewall, dip, sip)
+        is_user = sip == self.ip_addr or dip == self.ip_addr
 
-        # print("Packet is allowed.") if is_traffic and is_user else print("Packet is blocked.")
+        if not in_firewall or not is_user:
+            return False
+        
+        protocol = self.config[self.config['ips'].isin([sip, dip])]['protocol'].values[0]
 
-        return in_firewall and is_user
+        if protocol == 'all':
+            is_traffic = True
+        else:
+            is_traffic = packet.haslayer(protocol) if protocol and protocol in PROTOCOLS.keys() else False
+
+        return is_traffic
 
 
 
@@ -237,10 +252,12 @@ def main():
     print(firewall.fw_config.ip_addr)
     google, google_aliases, google_ips = firewall.get_ip_from_host('www.google.com')
     manga4life, manga4life_aliases, manga4life_ips = firewall.get_ip_from_host('www.manga4life.com')
+    asura, asura_aliases, asura_ips = firewall.get_ip_from_host('asuracomic.net')
 
     # firewall.add_firewall(google, google_aliases, google_ips)
     firewall.add_firewall(manga4life, manga4life_aliases, manga4life_ips, outbound=False, inbound=False)
-    firewall.add_firewall(google, google_aliases, google_ips, protocol='tcp')
+    firewall.add_firewall(google, google_aliases, google_ips, inbound=False, outbound=False, protocol='tcp')
+    firewall.add_firewall(asura, asura_aliases, asura_ips, inbound=False, outbound=False, protocol='tcp')
 
     firewall.show_firewall()
     firewall.run(count=10)

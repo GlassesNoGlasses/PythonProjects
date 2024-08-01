@@ -1,3 +1,4 @@
 host,aliases,ips,inbound,outbound,protocol
-www.manga4life.com,[],"['104.21.75.113', '172.67.222.203']",False,False,
-www.google.com,[],['142.251.215.228'],True,True,<class 'scapy.layers.inet.TCP'>
+www.manga4life.com,[],"['104.21.75.113', '172.67.222.203']",False,False,all
+www.google.com,[],['142.251.33.68'],False,False,<class 'scapy.layers.inet.TCP'>
+asuracomic.net,[],"['172.67.222.50', '104.21.54.11']",False,False,<class 'scapy.layers.inet.TCP'>
