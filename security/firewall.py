@@ -1,19 +1,48 @@
 import socket
 import scapy.all as scapy
-import csv
-from ipaddress import ip_address, IPv4Address
+import pandas as pd
+from ast import literal_eval
+from ipaddress import ip_address
 
+# csv file config
 CSV_FIELDS = ['host', 'aliases', 'ips', 'inbound', 'outbound', 'protocol']
 
+# load respective scapy layers
+scapy.load_layer("http")
+scapy.load_layer("tls")
+scapy.load_layer("dns")
+
+# protocols
+PROTOCOLS = {
+    'tcp': scapy.TCP, 
+    'udp': scapy.UDP, 
+    'icmp': scapy.ICMP, 
+    'dns': scapy.DNS,
+    "all": True,
+}
 
 class FirewallConfig():
     
-    def __init__(self, csv_file: str, autosave: bool = True) -> None:
-        self.config = {}
-        self.default = {'inbound': True, 'outbound': True, 'protocol': None}
-        self.csv_file = csv_file
+    def __init__(self, csv_path: str, ip_addr: str, autosave: bool = True) -> None:
+        # user's ip address
+        self.ip_addr = ip_addr
+
+        # store configuration of the firewall
+        self.config = pd.DataFrame(columns=CSV_FIELDS)
+
+        # blocked_cache frequent ip addresses for inbound/outbound allowance
+        self.blocked_cache = {'inbound': [], 'outbound': []}
+
+        # default settings for the firewall
+        self.default = {'inbound': True, 'outbound': True, 'protocol': 'all'}
+
+        # csv file path to save configuration
+        self.csv_path = csv_path
+
+        # autosave configuration; defaults to true
         self.autosave = autosave
     
+
     def validIPAddress(self, ip: str) -> str:
         ''' Check if the ip address is valid. Returns "IPv4" or "IPv6" if valid, None otherwise. '''
         try:
@@ -30,73 +59,164 @@ class FirewallConfig():
         ''' Filter out invalid ip addresses. '''
         return [ip for ip in ips if self.validIPAddress(ip)]
     
+
+    # def ip_to_host(self, ip: str) -> str | None:
+    #     ''' Convert ip address to host name. '''
+    #     host = self.config[ip in self.config['ips']]['host'].values[0]
+    #     return host if host else None
+    
+
     def save_config(self) -> None:
         ''' Save the firewall configuration to a csv file. '''
 
-        with open(self.csv_file, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=CSV_FIELDS)
-            writer.writeheader()
+        self.config.to_csv(self.csv_path, columns=CSV_FIELDS, index=False)
 
-            for host, data in self.config.items():
-                writer.writerow({'host': host, 'aliases': data['aliases'], 'ips': data['ips'], 'inbound': data['inbound'], 'outbound': data['outbound'], 'protocol': data['protocol']})
     
-    def load_config(self) -> bool:
+    def load_config(self, csv: str) -> bool:
         ''' Load the firewall configuration from a csv file. '''
 
-        try:
-            with open(self.csv_file, 'r') as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    self.config[row['host']] = {'aliases': row['aliases'], 'ips': row['ips'], 'inbound': row['inbound'], 'outbound': row['outbound'], 'protocol': row['protocol']}
-        except FileNotFoundError:
+        self.config = pd.read_csv(csv)
+
+        if (self.config.empty):
             return False
+        
+        # convert string of lists to literal lists
+        self.config.loc[:, 'ips'] = self.config['ips'].apply(literal_eval)
+        self.config.loc[:, 'aliases'] = self.config['aliases'].apply(literal_eval)
+
+        # update blocked_cache
+        self.blocked_cache['inbound'] = self.config[self.config['inbound'] == False]['ips']
+        self.blocked_cache['outbound'] = self.config[self.config['outbound'] == False]['ips']
         
         return True
 
-    
-    def update_config(self, host: str, aliases: list[str], ips: list[str], inbound: bool = True, 
-                      outbound: bool = True, protocol: str | None = None) -> bool:
+
+    def update_config(self, host: str, aliases: list[str], ips: list[str], inbound: bool, 
+                      outbound: bool, protocol: str | None) -> bool:
         ''' Update the configuration. '''
 
         filtered_ips = self.filter_ips(ips)
+        index = -1
 
-        if not filtered_ips:
+        if not filtered_ips or not host:
             return False
-        
-        self.config[host] = {'aliases': aliases, 'ips': filtered_ips, 'inbound': inbound, 'outbound': outbound, 'protocol': protocol}
 
+        # set default values
+        inbound = inbound if inbound is not None else self.default['inbound']
+        outbound = outbound if outbound is not None else self.default['outbound']
+        protocol = PROTOCOLS[protocol] if protocol and protocol.lower() in PROTOCOLS.keys() else self.default['protocol']
+        
+        # existing host in the configuration
+        if host in self.config['host'].values:
+            index = self.config[self.config['host'] == host].index.values[0]
+        else:
+            index = 0 if pd.isnull(self.config.index.max()) else self.config.index.max() + 1
+        
+        # add to config
+        self.config.loc[index, CSV_FIELDS] = [host, aliases, filtered_ips, inbound, outbound, protocol]
+
+        # add to blocked_cache
+        self.blocked_cache['inbound'] += filtered_ips if not inbound else []
+        self.blocked_cache['outbound'] += filtered_ips if not outbound else []
+        
         if self.autosave:
             self.save_config()
         
         return True
     
-    def delete_config(self, host: str) -> bool:
+    def delete_config(self, host: str) -> None:
         ''' Delete a configuration. '''
-        if host in self.config:
-            del self.config[host]
-            return True
-        return False
+
+        self.config = self.config.drop(host)
+
+        if self.autosave:
+            self.save_config()
+
+    
+    def show_config(self, count: None | int = None) -> dict:
+        ''' Show the configuration. '''
+
+        print(self.config.head(count)) if count else print(self.config)
+
+
+    def packet_filter(self, packet) -> bool:
+        ''' Filter packets. '''
+
+        if (not packet.haslayer(scapy.IP)):
+            return False
+
+        # filter packets based on current machines ip address src/dst
+        sip = packet[IPv6].src if (IPv6 in packet) else packet[IP].src
+        dip = packet[IPv6].dst if (IPv6 in packet) else packet[IP].dst
+
+        in_firewall = sip in self.blocked_cache['inbound'] or dip in self.blocked_cache['outbound']
+        is_user = sip == self.ip_addr or dip == self.ip_addr
+
+        if not in_firewall or not is_user:
+            return False
+        
+        protocol = self.config[self.config['ips'].isin([sip, dip])]['protocol'].values[0]
+
+        if protocol == 'all':
+            is_traffic = True
+        else:
+            is_traffic = packet.haslayer(protocol) if protocol and protocol in PROTOCOLS.keys() else False
+
+        return is_traffic
+
+
+
+    def packet_prn(self, packet) -> None:
+        ''' Perform actions on packets from blocked inbound/outpound configs. '''
+
+
+        if packet.haslayer(scapy.IP):
+            sip = packet[IPv6].src if (IPv6 in packet) else packet[IP].src
+            dip = packet[IPv6].dst if (IPv6 in packet) else packet[IP].dst
+
+            if sip in self.blocked_cache['inbound']:
+                print(f"Packet from {sip} is blocked.")
+                return
+            elif dip in self.config['outbound']:
+                print(f"Packet to {dip} is blocked.")
+                return
+            else:
+                print(f"Packet from {sip} to {dip} is allowed.")
+                return
+        
+        print("Packet is allowed.")
+        return
 
 
 class Firewall():
 
-    def __init__(self, ip_addr = None, auto_save: bool = True, csv_file: str = "./firewall.csv") -> None:
+    def __init__(self, ip_addr = None, auto_save: bool = True, csv_path: str = "./firewall.csv") -> None:
+        # fetch the ip address of the current machine
+        ip_addr = ip_addr if ip_addr else self.initialize_ip()
 
-        self.config = FirewallConfig(autosave=auto_save, csv_file=csv_file)
-        self.ip_addr = ip_addr if ip_addr else self.get_ip()
-        self.csv_file = csv_file
+        # initialize config
+        self.fw_config = FirewallConfig(autosave=auto_save, csv_path=csv_path, ip_addr=ip_addr)
     
-    def get_ip():
-        ''' Get's the ip address of the host. '''
-        return socket.gethostbyname(socket.gethostname())
-        
-    def get_ip_from_host(host: str):
+    
+    def initialize_ip(self) -> str:
+        ''' Initialize and fetch for the current machine's ip address. '''
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+
+        return ip
+    
+
+    def get_ip_from_host(self, host: str):
         ''' Return (hostname, aliases, ipaddrlist) from host name. Supports ipv4 only.'''
         try:
             ips = socket.gethostbyname_ex(host)
         except socket.gaierror:
             ips = None
         return ips
+
 
     def add_firewall(self, host: str, aliases: list[str], ips: list[str], inbound: bool = True, 
                      outbound: bool = True, protocol: str | None = None) -> bool:
@@ -113,16 +233,34 @@ class Firewall():
         except AttributeError:
             return False
 
-        return self.config.update_config(host, aliases, ips, inbound, outbound, protocol)
+        return self.fw_config.update_config(host, aliases, ips, inbound, outbound, protocol)
     
-    def show_firewalls(self) -> dict:
+    def show_firewall(self) -> dict:
         ''' Show the firewall configuration. '''
-        return self.config.config
 
+        self.fw_config.show_config()
+    
+
+    def run(self, count: int | None = None) -> None:
+        ''' Run the firewall. '''
+        
+        capture = scapy.sniff(lfilter=self.fw_config.packet_filter, count=count, prn=self.fw_config.packet_prn)
+        capture.show()
 
 def main():
     firewall = Firewall()
-    print(firewall.ip_addr)
-    print(firewall.get_ip_from_host('www.google.com'))
-    print(firewall.get_ip_from_host('www.manga4life.com'))
+    print(firewall.fw_config.ip_addr)
+    google, google_aliases, google_ips = firewall.get_ip_from_host('www.google.com')
+    manga4life, manga4life_aliases, manga4life_ips = firewall.get_ip_from_host('www.manga4life.com')
+    asura, asura_aliases, asura_ips = firewall.get_ip_from_host('asuracomic.net')
+
+    # firewall.add_firewall(google, google_aliases, google_ips)
+    firewall.add_firewall(manga4life, manga4life_aliases, manga4life_ips, outbound=False, inbound=False)
+    firewall.add_firewall(google, google_aliases, google_ips, inbound=False, outbound=False, protocol='tcp')
+    firewall.add_firewall(asura, asura_aliases, asura_ips, inbound=False, outbound=False, protocol='tcp')
+
+    firewall.show_firewall()
+    firewall.run(count=10)
+
+main()
 
