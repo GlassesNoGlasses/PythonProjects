@@ -3,3 +3,4 @@
 /openai-env
 
 /security/firewall.csv
+/security/filtered.pcap
