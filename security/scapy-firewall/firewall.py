@@ -220,15 +220,18 @@ class Firewall():
         self.fw_config.show_config()
     
 
-    def run(self, count: int | None = None) -> None:
+    def run(self, count: int | None = None, write: bool = True) -> None:
         ''' Run the firewall. '''
         
         capture = scapy.sniff(lfilter=self.fw_config.packet_filter, count=count, prn=self.fw_config.packet_prn)
-        scapy.wrpcap("firewall.pcap", capture)
+
+        if write:
+            scapy.wrpcap("firewall.pcap", capture)
+        
 
 def main():
     firewall = Firewall()
-    print(firewall.fw_config.ip_addr)
+    print("RUNNIN ON IP: ", firewall.fw_config.ip_addr)
     google, google_aliases, google_ips = firewall.get_ip_from_host('www.google.com')
     manga4life, manga4life_aliases, manga4life_ips = firewall.get_ip_from_host('www.manga4life.com')
     asura, asura_aliases, asura_ips = firewall.get_ip_from_host('asuracomic.net')
