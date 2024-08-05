@@ -16,9 +16,8 @@ class FirewallSim():
 
         # start host socket
         try:
-            self.host = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IP)
+            self.host = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.host.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # reuse address if left in TIME_WAIT state
-            self.host.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1) # include IP headers
         except PermissionError as e:
             print(f"Error binding host socket: {e}")
             return
@@ -42,10 +41,9 @@ class FirewallSim():
                         raise ValueError(f'Invalid IP address given: {ip}')
             
             for ip in sender_ips:
-                sender = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IP)
-                sender.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
+                sender = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self.senders[ip] = sender
-                sender.connect((ip, self.port))
         except ValueError as e:
             print(f"Error instantiating senders IPs: {e}")
             self.cleanup_senders()
@@ -93,11 +91,8 @@ class FirewallSim():
         print("Senders: ", self.senders)
 
 
-    def run(self, packet_count: int = -1, num_senders: int = 3, sender_ips: list[str] | None = []) -> None:
+    def run(self, num_senders: int = 3, sender_ips: list[str] | None = []) -> None:
         ''' Start the simulation. Optionally, specify the number of packets to send. '''
-
-        packet_count = packet_count if packet_count > 0 else float('inf')
-        count = 0
 
         # set up host to listen for packets
         self.host.bind((self.host_ip, self.port)) # bind host socket to host_ip/port
@@ -113,10 +108,14 @@ class FirewallSim():
                 thread.start()
  
             # start listening for packets
-            while count < packet_count:
-                packet, addr = self.host.recvfrom(65565)
-                logging.info(f"Received packet from {addr}: {packet}")
-                count += 1
+            self.host.listen(len(self.senders))
+
+            conn, addr = self.host.accept()
+
+            host = threading.Thread(target=host_new_connection, args=(conn, addr))
+            host.setDaemon = True
+            host.start()
+            
     
         except Exception as e:
             print(f"Error receiving packet: {e}")
@@ -133,17 +132,38 @@ def send_packet(sender: socket.socket, source_ip: str, port: int, dest_ip: str, 
     if not validIPAddress(dest_ip) or not validIPAddress(source_ip):
         print("Invalid source/dest IP addresses.")
 
-    logging.info(f"Sending packet from {source_ip} to {dest_ip}...")
+    logging.info(f"[{source_ip}]] Sending packet to {dest_ip}...")
+    print(payload)
 
     try:
-        sender.send(payload, 65565)
+        sender.sendall(payload)
     except InterruptedError as e:
         print(f"Packet sending interrupted: {e}")
         return
     except OSError as e:
         print(f"[Error] Sending packet: {e}")
         return
+
+
+def host_new_connection(conn: socket, addr) -> None:
+    ''' Accept a new connection from a sender. '''
+
+    if not conn or not addr:
+        print("[HOST] Invalid connection or address.")
+        return
+
+    print(f"[HOST] Connected by: {addr}")
     
+    with conn:
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                break
+
+            logging.info(f"[HOST] Received packet from {addr}: {data.decode()}")
+            logging.info(f"[HOST] Sending packet to {addr}")
+            conn.sendall(b"Response from host")
+
 
 def start_sender(sender: socket.socket, source_ip: str, port: int, dest_ip: str, interval: int = 1) -> None:
     ''' Start the sender to send packets to dest_ip. Specify the interval in seconds; defaults to 1s. '''
@@ -152,14 +172,24 @@ def start_sender(sender: socket.socket, source_ip: str, port: int, dest_ip: str,
         print(f"Invalid source/dest IP address. Source: {source_ip}, Dest: {dest_ip}.")
         return
 
-    print(f"Creating Client with IP: {source_ip}...")
-    payload = b"Hello from " + source_ip.encode()
 
     try:
+        # connect to host
+        print(f"Creating Client with IP: {source_ip}...")
+
+        sender.connect((dest_ip, port))
+
+        print(f"{source_ip} connected to HOST {dest_ip}...")
+
+        payload = b"Hello from " + source_ip.encode()
+
         # send packet every interval seconds
         timer = threading.Timer(interval=interval, function=send_packet, args=(sender, source_ip, port, dest_ip, payload))
         timer.daemon = True
         timer.start()
+
+        data = sender.recv(1024)
+        logging.info(f"[{source_ip}] Received from HOST: {data.decode()}")
 
     except KeyboardInterrupt:
         print(f"\n Exiting Client {source_ip}...")
@@ -177,7 +207,7 @@ if __name__ == '__main__':
     sim = FirewallSim()
 
     logging.info("Starting firewall simulation...")
-    sim.run(packet_count=10)
+    sim.run()
     logging.info("Ending firewall simulation")
 
     pass

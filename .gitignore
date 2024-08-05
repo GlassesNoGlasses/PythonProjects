@@ -4,3 +4,4 @@
 
 /security/scapy-firewall/firewall.csv
 /security/scapy-firewall/filtered.pcap
+/security/scapy-firewall/firewall.log
