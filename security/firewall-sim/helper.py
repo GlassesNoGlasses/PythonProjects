@@ -1,5 +1,5 @@
 
-import random
+from random import randint
 from socket import inet_ntoa
 from struct import pack, unpack
 from ipaddress import ip_address, IPv4Address, IPv6Address
@@ -16,9 +16,9 @@ def generate_ip(version: 4 | 6 = 4) -> str:
     MAX_IPV6 = IPv6Address._ALL_ONES  # 2 ** 128 - 1
 
     if version == 6:
-        return str(IPv6Address(random.randint(0, MAX_IPV6)))
+        return str(IPv6Address(randint(0, MAX_IPV6)))
 
-    return str(IPv4Address(random.randint(0, MAX_IPV4)))
+    return str(IPv4Address(randint(0, MAX_IPV4)))
 
 
 def validIPAddress(ip: str) -> bool:
@@ -81,7 +81,7 @@ def unpack_udp_packet(packet: bytes):
 def unpack_tcp_packet(packet: bytes):
     ''' Unpack a TCP packet and return (src_port, dest_port, payload) '''
 
-    tcp_h = unpack("!HHLLssBBHHH", packet[:20])
+    tcp_h = unpack("!HHLLBBHHH", packet[:20])
 
     src_port = tcp_h[0]
     dest_port = tcp_h[1]
@@ -93,16 +93,15 @@ def tcp_packet(source_port: int, dest_port: int, payload: bytes) -> bytes:
     ''' Create a TCP packet with the given parameters. '''
 
     # tcp packet header fields
-    seq_num = random.randint(0, 65535) # random sequence number
+    seq_num = randint(0, 65535) # random sequence number
     ack_num = 0 # no ack number as first packet in connection
     data_offset = 5 # 20 bytes constant
     reserved = 0 # reserved bits
-    flags = 0 # no flags set
     window_size = 8192 # window size
     checksum = 0 # checksum; 0 for now
     urgent_pointer = 0 # no urgent pointer
 
-    header = pack("!HHLLssBBHHH", source_port, dest_port, seq_num, ack_num, data_offset, reserved, flags, window_size, checksum, urgent_pointer)
+    header = pack("!HHLLBBHHH", source_port, dest_port, seq_num, ack_num, data_offset, reserved, window_size, checksum, urgent_pointer)
     return header + payload
 
 
@@ -117,7 +116,7 @@ def ipv4_packet(protocol: int, source_ip: str, dest_ip: str, payload: bytes) -> 
     ttl = 255 # Time to Live; 255 for maximum
     checksum = 0 # Checksum; 0 for now
     total_length = ihl + len(payload)
-    identification = random.randint(0, 65535)
+    identification = randint(0, 65535)
 
     header = pack("!BBHHHBBH4s4s", 4, ihl, tos, total_length, identification, ttl, protocol, checksum, source_ip, dest_ip)
     return header + payload

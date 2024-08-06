@@ -7,7 +7,7 @@
 
 # firewall sim logging files
 /firewall-sim/firewall_config.csv
-/firewall-sim/__pycache__
+/firewall-sim/__pycache__/*
 /firewall-sim/firewall.log
 
 

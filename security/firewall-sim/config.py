@@ -85,8 +85,15 @@ class FirewallSimConfig():
         return True
     
 
-    def is_protocol_allowed(self, source_ip: str, dest_ip: str, protocol: str) -> bool:
+    def is_protocol_allowed(self, source_ip: str, dest_ip: str, protocol_num: int) -> bool:
         ''' Verify if the source IP has access to the destination IP. '''
+
+        protocol = None
+
+        if protocol_num == 6:
+            protocol = 'tcp'
+        elif protocol_num == 17:
+            protocol = 'udp'
 
         if not source_ip or not dest_ip or protocol not in self.protocols:
             return False
@@ -97,4 +104,10 @@ class FirewallSimConfig():
         if config.empty:
             return False
         
-        return config['access'].values[0]
+        return bool(config['access'].values[0])
+    
+    
+    def summary(self) -> None:
+        ''' Print the configuration summary. '''
+
+        print(self.config)

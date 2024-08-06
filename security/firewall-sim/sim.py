@@ -3,7 +3,8 @@ import socket
 import logging
 import threading
 import time
-from helper import generate_ip, validIPAddress, create_packet, unpack_ipv4_packet, PROTOCOLS
+from random import getrandbits
+from helper import *
 from config import FirewallSimConfig
 
 
@@ -12,7 +13,7 @@ class FirewallSim():
     def __init__(self, host_ip: str = "127.0.0.1", port: int = 4444) -> None:
         ''' Initialize the firewall simulator. Optionally can specify a host/port to instantiate.'''
 
-        self.config = FirewallSimConfig("firewall_config.csv", PROTOCOLS.keys())
+        self.config = FirewallSimConfig("firewall_config.csv", list(PROTOCOLS.keys()))
         self.host_ip: str = host_ip
         self.port: int = port
         self.senders: dict[str, socket.socket] = {}
@@ -50,7 +51,9 @@ class FirewallSim():
 
                 # add rules for each sender; defaults to false
                 for protocol in self.config.protocols:
-                    self.config.add_rule(self.host_ip, ip, protocol, False)
+                    access = bool(getrandbits(1))
+                    self.config.add_rule(self.host_ip, ip, protocol, access)
+                    self.config.add_rule(ip, self.host_ip, protocol, access)
         except ValueError as e:
             print(f"Error instantiating senders IPs: {e}")
             self.cleanup_senders()
@@ -90,12 +93,13 @@ class FirewallSim():
         exit()
 
     
-    def show_connections(self) -> None:
+    def summary(self) -> None:
         ''' Show the current senders and host information. '''
 
         print("Host IP: ", self.host_ip)
         print("Host Port: ", self.port)
         print("Senders: ", self.senders)
+        self.config.summary()
 
 
     def run(self, num_senders: int = 3, sender_ips: list[str] | None = []) -> None:
@@ -104,6 +108,7 @@ class FirewallSim():
         # set up host to listen for packets
         self.host.bind((self.host_ip, self.port)) # bind host socket to host_ip/port
         self.instantiate_senders(num_senders, sender_ips)
+        self.summary()
         
         print("[START]: Starting simulation...")
 
@@ -127,21 +132,21 @@ class FirewallSim():
         except KeyboardInterrupt:
             print("\n[END]: Exiting simulation...")
             self.shutdown()
-            return
+            exit()
         
         except Exception as e:
             print(f"Error receiving packet: {e}")
             exit()
         
 
-def send_packet(sender: socket.socket, source_ip: str, dest_ip: str, payload: bytes) -> None:
+def send_packet(sender: socket.socket, source_ip: str, dest_ip: str, port: int, payload: bytes) -> None:
     ''' Send a packet with payload payload from the sender to dest_ip. dest_ip defaults to the host IP. '''
 
     if not validIPAddress(dest_ip) or not validIPAddress(source_ip):
         print("Invalid source/dest IP addresses.")
 
     logging.info(f"[{source_ip}] Sending packet to {dest_ip}...")
-    packet = create_packet(payload, source_ip, dest_ip)
+    packet = create_packet(payload, source_ip, dest_ip, source_port=port, dest_port=port, protocol='tcp')
 
     try:
         sender.sendall(packet)
@@ -168,13 +173,28 @@ def host_new_connection(conn: socket, addr, config: FirewallSimConfig) -> None:
 
             protocol, src_ip, dest_ip, payload = unpack_ipv4_packet(data)
             logging.info(f"[HOST] {src_ip} {protocol} > {dest_ip}")
+            allowed = config.is_protocol_allowed(src_ip, dest_ip, protocol)
+            print(f"ACCESS FROM {src_ip} to HOST: ", allowed)
 
             if config.is_protocol_allowed(src_ip, dest_ip, protocol):
-                logging.info(f"[Firewall] Allowed: Payload is {payload.decode()}")
-                conn.sendall(b"Allowed Access")
+                logging.info(f"[Firewall] Packet is Allowed: {src_ip} can access {dest_ip} via {protocol}")
+
+                if protocol == 6:
+                    # tcp packet
+                    src_port, dest_port, payload = unpack_tcp_packet(payload)
+                    logging.info(f"[HOST] TCP: {src_port} > {dest_port} with payload: {payload.decode()}")
+                    conn.sendall(b'[TCP] Allowed Access')
+                elif protocol == 17:
+                    # udp packet
+                    src_port, dest_port, payload = unpack_udp_packet(payload)
+                    logging.info(f"[HOST] UDP: {src_port} > {dest_port} with payload: {payload.decode()}")
+                    conn.sendall(b'[UDP] Allowed Access')
+        
+                conn.sendall(b"Allowed Access by Firewall")
             else:
                 logging.info(f"[Firewall] Blocked: IP {src_ip} blocked from accessing {dest_ip} via {protocol}")
                 conn.sendall(b"Blocked by firewall")
+
 
 def start_sender(sender: socket.socket, source_ip: str, port: int, dest_ip: str, interval: float = 5.0) -> None:
     ''' Start the sender to send packets to dest_ip. Specify the interval in seconds; defaults to 1s. '''
@@ -198,7 +218,7 @@ def start_sender(sender: socket.socket, source_ip: str, port: int, dest_ip: str,
         while True:
             logging.info(f"[{source_ip}] Sending packet to {dest_ip}...")
             
-            send_packet(sender, source_ip, dest_ip, payload)
+            send_packet(sender, source_ip, dest_ip, port, payload)
             data = sender.recv(1024)
 
             logging.info(f"[{source_ip}] Received from HOST: {data.decode()}")
