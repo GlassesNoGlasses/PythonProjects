@@ -114,7 +114,8 @@ def send_packet(sender: socket.socket, source_ip: str, dest_ip: str, port: int, 
         print("Invalid source/dest IP addresses.")
 
     logging.info(f"[{source_ip}] Sending packet to {dest_ip}...")
-    packet = create_packet(payload, source_ip, dest_ip, source_port=port, dest_port=port, protocol='udp')
+    protocol = 'tcp' if randint(0, 1) == 1 else 'udp'
+    packet = create_packet(payload, source_ip, dest_ip, source_port=port, dest_port=port, protocol=protocol)
 
     try:
         sender.sendall(packet)
