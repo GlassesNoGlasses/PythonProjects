@@ -3,8 +3,8 @@ import socket
 import logging
 import threading
 import time
-from struct import unpack
-from helper import generate_ip, validIPAddress, create_packet, unpack_ipv4_packet
+from helper import generate_ip, validIPAddress, create_packet, unpack_ipv4_packet, PROTOCOLS
+from config import FirewallSimConfig
 
 
 class FirewallSim():
@@ -12,6 +12,7 @@ class FirewallSim():
     def __init__(self, host_ip: str = "127.0.0.1", port: int = 4444) -> None:
         ''' Initialize the firewall simulator. Optionally can specify a host/port to instantiate.'''
 
+        self.config = FirewallSimConfig("firewall_config.csv", PROTOCOLS.keys())
         self.host_ip: str = host_ip
         self.port: int = port
         self.senders: dict[str, socket.socket] = {}
@@ -46,6 +47,10 @@ class FirewallSim():
                 sender = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 self.senders[ip] = sender
+
+                # add rules for each sender; defaults to false
+                for protocol in self.config.protocols:
+                    self.config.add_rule(self.host_ip, ip, protocol, False)
         except ValueError as e:
             print(f"Error instantiating senders IPs: {e}")
             self.cleanup_senders()
@@ -115,7 +120,7 @@ class FirewallSim():
             while True:
                 conn, addr = self.host.accept()
 
-                host = threading.Thread(target=host_new_connection, args=(conn, addr))
+                host = threading.Thread(target=host_new_connection, args=(conn, addr, self.config))
                 host.setDaemon = True
                 host.start()
             
@@ -129,17 +134,14 @@ class FirewallSim():
             exit()
         
 
-def send_packet(sender: socket.socket, source_ip: str, port: int, dest_ip: str, payload: bytes) -> None:
+def send_packet(sender: socket.socket, source_ip: str, dest_ip: str, payload: bytes) -> None:
     ''' Send a packet with payload payload from the sender to dest_ip. dest_ip defaults to the host IP. '''
 
     if not validIPAddress(dest_ip) or not validIPAddress(source_ip):
         print("Invalid source/dest IP addresses.")
 
     logging.info(f"[{source_ip}] Sending packet to {dest_ip}...")
-    print("SENDING: ", payload)
-
     packet = create_packet(payload, source_ip, dest_ip)
-    print("PACKET: ", packet)
 
     try:
         sender.sendall(packet)
@@ -151,15 +153,13 @@ def send_packet(sender: socket.socket, source_ip: str, port: int, dest_ip: str, 
         return
 
 
-def host_new_connection(conn: socket, addr) -> None:
+def host_new_connection(conn: socket, addr, config: FirewallSimConfig) -> None:
     ''' Accept a new connection from a sender. '''
 
     if not conn or not addr:
         print("[HOST] Invalid connection or address.")
         return
 
-    print(f"[HOST] Connected by: {addr}")
-    
     with conn:
         while True:
             data = conn.recv(1024)
@@ -167,11 +167,14 @@ def host_new_connection(conn: socket, addr) -> None:
                 break
 
             protocol, src_ip, dest_ip, payload = unpack_ipv4_packet(data)
-
             logging.info(f"[HOST] {src_ip} {protocol} > {dest_ip}")
-            logging.info(f"[HOST] Sending packet to {addr}")
-            conn.sendall(b"Response from host")
 
+            if config.is_protocol_allowed(src_ip, dest_ip, protocol):
+                logging.info(f"[Firewall] Allowed: Payload is {payload.decode()}")
+                conn.sendall(b"Allowed Access")
+            else:
+                logging.info(f"[Firewall] Blocked: IP {src_ip} blocked from accessing {dest_ip} via {protocol}")
+                conn.sendall(b"Blocked by firewall")
 
 def start_sender(sender: socket.socket, source_ip: str, port: int, dest_ip: str, interval: float = 5.0) -> None:
     ''' Start the sender to send packets to dest_ip. Specify the interval in seconds; defaults to 1s. '''
@@ -193,9 +196,13 @@ def start_sender(sender: socket.socket, source_ip: str, port: int, dest_ip: str,
 
         # send packets at interval
         while True:
-            send_packet(sender, source_ip, port, dest_ip, payload)
+            logging.info(f"[{source_ip}] Sending packet to {dest_ip}...")
+            
+            send_packet(sender, source_ip, dest_ip, payload)
             data = sender.recv(1024)
+
             logging.info(f"[{source_ip}] Received from HOST: {data.decode()}")
+
             time.sleep(interval - ((time.monotonic() - starttime) % interval))
 
     except Exception as e:

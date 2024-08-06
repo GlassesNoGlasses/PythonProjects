@@ -1,0 +1,13 @@
+
+# firewall logging files
+/scapy-firewall/firewall.csv
+/scapy-firewall/filtered.pcap
+/scapy-firewall/firewall.log
+
+
+# firewall sim logging files
+/firewall-sim/firewall_config.csv
+/firewall-sim/__pycache__
+/firewall-sim/firewall.log
+
+

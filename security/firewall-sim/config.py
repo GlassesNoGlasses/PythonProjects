@@ -7,7 +7,8 @@ class FirewallSimConfig():
     def __init__(self, csv_path: str, protocols: list[str]) -> None:
         ''' Initialize the firewall simulator configuration. '''
 
-        self.columns = ['src_ip', 'dst_ip', 'inbound', 'outbound' 'protocol']
+        # columns: source IP, destination IP, protocol, access
+        self.columns = ['source_ip', 'dest_ip', 'protocol', 'access']
         self.config = pd.DataFrame(columns=self.columns)
         self.protocols = protocols
         self.csv_path = csv_path
@@ -30,64 +31,70 @@ class FirewallSimConfig():
         return True
     
 
-    def add_config(self, src_ip: str, dst_ip: str, inbound: bool, outbound: bool, protocol: str) -> bool:
+    def get_config(self, source_ip: str, dest_ip: str, protocol: str) -> pd.DataFrame:
+        ''' Get the firewall configuration. '''
+
+        return self.config[(self.config['source_ip'] == source_ip) & (self.config['dest_ip'] == dest_ip) & (self.config['protocol'] == protocol)]
+    
+
+    def add_rule(self, source_ip: str, dest_ip: str, protocol: str, access: bool = False) -> bool:
         ''' Add a new configuration. '''
 
-        if not src_ip or not dst_ip or protocol not in self.protocols:
+        if not source_ip or not dest_ip or protocol not in self.protocols:
             return False
         
         # check if the configuration already exists
-        if not self.config[(self.config['src_ip'] == src_ip) & (self.config['dst_ip'] == dst_ip)].empty:
+        if not self.get_config(source_ip, dest_ip, protocol).empty:
             return False
 
-        self.config.loc[len(self.config)] = [src_ip, dst_ip, inbound, outbound, protocol]
+        self.config.loc[len(self.config)] = [source_ip, dest_ip, protocol, access]
         
         return True
     
 
-    def update_config(self, src_ip: str, dst_ip: str, inbound: bool, outbound: bool, protocol: str) -> bool:
+    def update_rule(self, source_ip: str, dest_ip: str, protocol: str, access: bool) -> bool:
         ''' Update an existing configuration. Add the config if it doesn't exist. '''
 
-        if not src_ip or not dst_ip or protocol not in self.protocols:
+        if not source_ip or not dest_ip or protocol not in self.protocols:
             return False
         
         # check if the configuration exists
-        index = self.config[(self.config['src_ip'] == src_ip) & (self.config['dst_ip'] == dst_ip)].index
+        config = self.get_config(source_ip, dest_ip, protocol)
 
-        if index.empty:
-            return self.add_config(src_ip, dst_ip, inbound, outbound, protocol)
+        if config.empty:
+            return self.add_rule(source_ip, dest_ip, protocol, access)
         
-        self.config.loc[index, ['inbound', 'outbound', 'protocol']] = [inbound, outbound, protocol]
+        self.config.loc[config.index, 'access'] = access
         
         return True
     
 
-    def remove_config(self, src_ip: str, dst_ip: str) -> bool:
+    def remove_rule(self, source_ip: str, dest_ip: str, protocol) -> bool:
         ''' Remove a configuration. '''
 
-        if not src_ip or not dst_ip:
+        if not source_ip or not dest_ip:
             return False
         
-        index = self.config[(self.config['src_ip'] == src_ip) & (self.config['dst_ip'] == dst_ip)].index
-
-        if index.empty:
-            return True
-        
-        self.config.drop(index, inplace=True)
-        
-        return True
-    
-
-    def verify_access(self, src_ip: str, dst_ip: str, protocol: str) -> bool:
-        ''' Verify if the source IP has access to the destination IP. '''
-
-        if not src_ip or not dst_ip or protocol not in self.protocols:
-            return False
-        
-        # check if the configuration exists
-        config = self.config[(self.config['src_ip'] == src_ip) & (self.config['dst_ip'] == dst_ip) & (self.config['protocol'] == protocol)]
+        config = self.get_config(source_ip, dest_ip, protocol)
 
         if config.empty:
             return False
         
-        return config['inbound'].values[0] and config['outbound'].values[0]
+        self.config.drop(config.index, inplace=True)
+        
+        return True
+    
+
+    def is_protocol_allowed(self, source_ip: str, dest_ip: str, protocol: str) -> bool:
+        ''' Verify if the source IP has access to the destination IP. '''
+
+        if not source_ip or not dest_ip or protocol not in self.protocols:
+            return False
+        
+        # check if the configuration exists
+        config = self.get_config(source_ip, dest_ip, protocol)
+
+        if config.empty:
+            return False
+        
+        return config['access'].values[0]
