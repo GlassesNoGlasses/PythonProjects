@@ -32,8 +32,10 @@ def validIPAddress(ip: str) -> bool:
     return None
 
 
-def create_packet(payload: bytes, source_ip: str, dest_ip: str, protocol: str = 'tcp') -> bytes | None:
-    ''' Creates a pseudo network layer packet with the payload and source/dest IP addresses. '''
+def create_packet(payload: bytes, source_ip: str, dest_ip: str, source_port: int, dest_port: int, 
+                  protocol: str = 'tcp') -> bytes | None:
+    ''' Creates a pseudo network layer packet with the payload and source/dest IP addresses. 
+        Returns an IPv4 packet with protocol as protocol if successful, None otherwise. '''
 
     if not validIPAddress(source_ip) or not validIPAddress(dest_ip) or ip_address(source_ip).version != ip_address(dest_ip).version:
         return None
@@ -42,14 +44,70 @@ def create_packet(payload: bytes, source_ip: str, dest_ip: str, protocol: str = 
 
     if not protocol:
         return None
+    
+    if protocol == PROTOCOLS['tcp']:
+        payload = tcp_packet(source_port=source_port, dest_port=dest_port, payload=payload)
+    elif protocol == PROTOCOLS['udp']:
+        payload = udp_packet(source_port=source_port, dest_port=dest_port, payload=payload)
+    
+    if ip_address(source_ip).version == 4:
+        return ipv4_packet(protocol=protocol, source_ip=source_ip, dest_ip=dest_ip, payload=payload)
+
+    return None
 
 
-    return ipv4_packet_header(version=ip_address(source_ip).version, 
-                            protocol=protocol, source_ip=source_ip, dest_ip=dest_ip, payload=payload)
+def udp_packet(source_port: int, dest_port: int, payload: bytes) -> bytes:
+    ''' Create a UDP packet with the given parameters. '''
+
+    # udp packet header fields
+    length = 8 + len(payload) # 8 bytes for header + payload length
+    checksum = 0 # checksum; 0 for now
+
+    header = pack("!HHHH", source_port, dest_port, length, checksum)
+    return header + payload
 
 
-def ipv4_packet_header(version: 4 | 6, protocol: int, source_ip: str, dest_ip: str, payload: bytes) -> bytes:
-    ''' Create an IP packet with the given parameters. '''
+def unpack_udp_packet(packet: bytes):
+    ''' Unpack a UDP packet and return (src_port, dest_port, payload) '''
+
+    udp_h = unpack("!HHHH", packet[:8])
+
+    src_port = udp_h[0]
+    dest_port = udp_h[1]
+
+    return src_port, dest_port, packet[8:]
+
+
+def unpack_tcp_packet(packet: bytes):
+    ''' Unpack a TCP packet and return (src_port, dest_port, payload) '''
+
+    tcp_h = unpack("!HHLLssBBHHH", packet[:20])
+
+    src_port = tcp_h[0]
+    dest_port = tcp_h[1]
+
+    return src_port, dest_port, packet[20:]
+
+
+def tcp_packet(source_port: int, dest_port: int, payload: bytes) -> bytes:
+    ''' Create a TCP packet with the given parameters. '''
+
+    # tcp packet header fields
+    seq_num = random.randint(0, 65535) # random sequence number
+    ack_num = 0 # no ack number as first packet in connection
+    data_offset = 5 # 20 bytes constant
+    reserved = 0 # reserved bits
+    flags = 0 # no flags set
+    window_size = 8192 # window size
+    checksum = 0 # checksum; 0 for now
+    urgent_pointer = 0 # no urgent pointer
+
+    header = pack("!HHLLssBBHHH", source_port, dest_port, seq_num, ack_num, data_offset, reserved, flags, window_size, checksum, urgent_pointer)
+    return header + payload
+
+
+def ipv4_packet(protocol: int, source_ip: str, dest_ip: str, payload: bytes) -> bytes:
+    ''' Create an IPv4 packet with the given parameters. '''
 
     # ip packet header fields
     ihl = 5 # Internet Header Length; 20 bytes constant
@@ -61,7 +119,7 @@ def ipv4_packet_header(version: 4 | 6, protocol: int, source_ip: str, dest_ip: s
     total_length = ihl + len(payload)
     identification = random.randint(0, 65535)
 
-    header = pack("!BBHHHBBH4s4s", version, ihl, tos, total_length, identification, ttl, protocol, checksum, source_ip, dest_ip)
+    header = pack("!BBHHHBBH4s4s", 4, ihl, tos, total_length, identification, ttl, protocol, checksum, source_ip, dest_ip)
     return header + payload
 
 
@@ -75,4 +133,6 @@ def unpack_ipv4_packet(packet: bytes):
     dest_ip = inet_ntoa(ipv4_h[9])
 
     return protocol, src_ip, dest_ip, packet[20:]
+
+
 
