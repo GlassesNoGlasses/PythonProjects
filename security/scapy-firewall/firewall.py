@@ -58,13 +58,7 @@ class FirewallConfig():
     def filter_ips(self, ips: list[str]) -> list[str]:
         ''' Filter out invalid ip addresses. '''
         return [ip for ip in ips if self.validIPAddress(ip)]
-    
 
-    # def ip_to_host(self, ip: str) -> str | None:
-    #     ''' Convert ip address to host name. '''
-    #     host = self.config[ip in self.config['ips']]['host'].values[0]
-    #     return host if host else None
-    
 
     def save_config(self) -> None:
         ''' Save the firewall configuration to a csv file. '''
@@ -169,23 +163,8 @@ class FirewallConfig():
     def packet_prn(self, packet) -> None:
         ''' Perform actions on packets from blocked inbound/outpound configs. '''
 
-
-        if packet.haslayer(scapy.IP):
-            sip = packet[IPv6].src if (IPv6 in packet) else packet[IP].src
-            dip = packet[IPv6].dst if (IPv6 in packet) else packet[IP].dst
-
-            if sip in self.blocked_cache['inbound']:
-                print(f"Packet from {sip} is blocked.")
-                return
-            elif dip in self.config['outbound']:
-                print(f"Packet to {dip} is blocked.")
-                return
-            else:
-                print(f"Packet from {sip} to {dip} is allowed.")
-                return
-        
-        print("Packet is allowed.")
-        return
+        print("ERROR: Packet blocked by firewall.")
+        print(packet.show())
 
 
 class Firewall():
@@ -241,15 +220,18 @@ class Firewall():
         self.fw_config.show_config()
     
 
-    def run(self, count: int | None = None) -> None:
+    def run(self, count: int | None = None, write: bool = True) -> None:
         ''' Run the firewall. '''
         
         capture = scapy.sniff(lfilter=self.fw_config.packet_filter, count=count, prn=self.fw_config.packet_prn)
-        capture.show()
+
+        if write:
+            scapy.wrpcap("firewall.pcap", capture)
+        
 
 def main():
     firewall = Firewall()
-    print(firewall.fw_config.ip_addr)
+    print("RUNNIN ON IP: ", firewall.fw_config.ip_addr)
     google, google_aliases, google_ips = firewall.get_ip_from_host('www.google.com')
     manga4life, manga4life_aliases, manga4life_ips = firewall.get_ip_from_host('www.manga4life.com')
     asura, asura_aliases, asura_ips = firewall.get_ip_from_host('asuracomic.net')
