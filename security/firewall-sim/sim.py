@@ -2,7 +2,9 @@
 import socket
 import logging
 import threading
-from helper import generate_ip, validIPAddress
+import time
+from struct import unpack
+from helper import generate_ip, validIPAddress, create_packet, unpack_ipv4_packet
 
 
 class FirewallSim():
@@ -10,9 +12,9 @@ class FirewallSim():
     def __init__(self, host_ip: str = "127.0.0.1", port: int = 4444) -> None:
         ''' Initialize the firewall simulator. Optionally can specify a host/port to instantiate.'''
 
-        self.host_ip = host_ip
-        self.port = port
-        self.senders = {}
+        self.host_ip: str = host_ip
+        self.port: int = port
+        self.senders: dict[str, socket.socket] = {}
 
         # start host socket
         try:
@@ -55,7 +57,7 @@ class FirewallSim():
 
         print("Cleaning up sender sockets...")
 
-        for sender in self.senders:
+        for sender in self.senders.values():
             try:
                 sender.shutdown(socket.SHUT_RDWR)
                 sender.close()
@@ -110,33 +112,37 @@ class FirewallSim():
             # start listening for packets
             self.host.listen(len(self.senders))
 
-            conn, addr = self.host.accept()
+            while True:
+                conn, addr = self.host.accept()
 
-            host = threading.Thread(target=host_new_connection, args=(conn, addr))
-            host.setDaemon = True
-            host.start()
+                host = threading.Thread(target=host_new_connection, args=(conn, addr))
+                host.setDaemon = True
+                host.start()
             
-    
+        except KeyboardInterrupt:
+            print("\n[END]: Exiting simulation...")
+            self.shutdown()
+            return
+        
         except Exception as e:
             print(f"Error receiving packet: {e}")
             exit()
         
-        print("[END]: Simulation ended.")
-        self.shutdown()
-        return
 
-
-def send_packet(sender: socket.socket, source_ip: str, port: int, dest_ip: str, payload) -> None:
+def send_packet(sender: socket.socket, source_ip: str, port: int, dest_ip: str, payload: bytes) -> None:
     ''' Send a packet with payload payload from the sender to dest_ip. dest_ip defaults to the host IP. '''
 
     if not validIPAddress(dest_ip) or not validIPAddress(source_ip):
         print("Invalid source/dest IP addresses.")
 
-    logging.info(f"[{source_ip}]] Sending packet to {dest_ip}...")
-    print(payload)
+    logging.info(f"[{source_ip}] Sending packet to {dest_ip}...")
+    print("SENDING: ", payload)
+
+    packet = create_packet(payload, source_ip, dest_ip)
+    print("PACKET: ", packet)
 
     try:
-        sender.sendall(payload)
+        sender.sendall(packet)
     except InterruptedError as e:
         print(f"Packet sending interrupted: {e}")
         return
@@ -160,12 +166,14 @@ def host_new_connection(conn: socket, addr) -> None:
             if not data:
                 break
 
-            logging.info(f"[HOST] Received packet from {addr}: {data.decode()}")
+            protocol, src_ip, dest_ip, payload = unpack_ipv4_packet(data)
+
+            logging.info(f"[HOST] {src_ip} {protocol} > {dest_ip}")
             logging.info(f"[HOST] Sending packet to {addr}")
             conn.sendall(b"Response from host")
 
 
-def start_sender(sender: socket.socket, source_ip: str, port: int, dest_ip: str, interval: int = 1) -> None:
+def start_sender(sender: socket.socket, source_ip: str, port: int, dest_ip: str, interval: float = 5.0) -> None:
     ''' Start the sender to send packets to dest_ip. Specify the interval in seconds; defaults to 1s. '''
 
     if not validIPAddress(source_ip) or not validIPAddress(dest_ip):
@@ -176,25 +184,20 @@ def start_sender(sender: socket.socket, source_ip: str, port: int, dest_ip: str,
     try:
         # connect to host
         print(f"Creating Client with IP: {source_ip}...")
-
         sender.connect((dest_ip, port))
-
         print(f"{source_ip} connected to HOST {dest_ip}...")
 
         payload = b"Hello from " + source_ip.encode()
 
-        # send packet every interval seconds
-        timer = threading.Timer(interval=interval, function=send_packet, args=(sender, source_ip, port, dest_ip, payload))
-        timer.daemon = True
-        timer.start()
+        starttime = time.monotonic()
 
-        data = sender.recv(1024)
-        logging.info(f"[{source_ip}] Received from HOST: {data.decode()}")
+        # send packets at interval
+        while True:
+            send_packet(sender, source_ip, port, dest_ip, payload)
+            data = sender.recv(1024)
+            logging.info(f"[{source_ip}] Received from HOST: {data.decode()}")
+            time.sleep(interval - ((time.monotonic() - starttime) % interval))
 
-    except KeyboardInterrupt:
-        print(f"\n Exiting Client {source_ip}...")
-        timer.cancel()
-        return
     except Exception as e:
         print(f"[Error] Starting Thread Packet: {e}")
         return
