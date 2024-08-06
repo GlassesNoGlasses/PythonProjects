@@ -5,9 +5,7 @@
 /scapy-firewall/firewall.log
 
 
-# firewall sim logging files
-/firewall-sim/firewall_config.csv
+# firewall sim files
 /firewall-sim/__pycache__/*
-/firewall-sim/firewall.log
 
 

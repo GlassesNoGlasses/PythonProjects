@@ -60,39 +60,6 @@ class FirewallSim():
             return
         
     
-    def cleanup_senders(self) -> None:
-        ''' Cleanup the sender sockets. '''
-
-        print("Cleaning up sender sockets...")
-
-        for sender in self.senders.values():
-            try:
-                sender.shutdown(socket.SHUT_RDWR)
-                sender.close()
-            except OSError as e:
-                print(f"Error closing sender socket: {e}")
-        
-        self.senders = {}
-        print("Finished cleaning up sender sockets.")
-
-    
-    def shutdown(self) -> None:
-        ''' Cleanup the host and sender sockets. '''
-
-        print("Cleaning up...")
-
-        try:
-            self.host.shutdown(socket.SHUT_RDWR)
-            self.host.close()
-
-            self.cleanup_senders()
-        except OSError as e:
-            print(f"Error closing sockets: {e}")
-
-        print("All sockets closed.")
-        exit()
-
-    
     def summary(self) -> None:
         ''' Show the current senders and host information. '''
 
@@ -108,9 +75,9 @@ class FirewallSim():
         # set up host to listen for packets
         self.host.bind((self.host_ip, self.port)) # bind host socket to host_ip/port
         self.instantiate_senders(num_senders, sender_ips)
-        self.summary()
         
         print("[START]: Starting simulation...")
+        logging.info("Starting firewall simulation...")
 
         try:
             # start senders
@@ -130,13 +97,14 @@ class FirewallSim():
                 host.start()
             
         except KeyboardInterrupt:
+            self.config.save_config()
             print("\n[END]: Exiting simulation...")
-            self.shutdown()
-            exit()
+            logging.info("Exiting simulation...")
+            exit(1)
         
         except Exception as e:
             print(f"Error receiving packet: {e}")
-            exit()
+            exit(1)
         
 
 def send_packet(sender: socket.socket, source_ip: str, dest_ip: str, port: int, payload: bytes) -> None:
@@ -146,7 +114,7 @@ def send_packet(sender: socket.socket, source_ip: str, dest_ip: str, port: int, 
         print("Invalid source/dest IP addresses.")
 
     logging.info(f"[{source_ip}] Sending packet to {dest_ip}...")
-    packet = create_packet(payload, source_ip, dest_ip, source_port=port, dest_port=port, protocol='tcp')
+    packet = create_packet(payload, source_ip, dest_ip, source_port=port, dest_port=port, protocol='udp')
 
     try:
         sender.sendall(packet)
@@ -173,8 +141,6 @@ def host_new_connection(conn: socket, addr, config: FirewallSimConfig) -> None:
 
             protocol, src_ip, dest_ip, payload = unpack_ipv4_packet(data)
             logging.info(f"[HOST] {src_ip} {protocol} > {dest_ip}")
-            allowed = config.is_protocol_allowed(src_ip, dest_ip, protocol)
-            print(f"ACCESS FROM {src_ip} to HOST: ", allowed)
 
             if config.is_protocol_allowed(src_ip, dest_ip, protocol):
                 logging.info(f"[Firewall] Packet is Allowed: {src_ip} can access {dest_ip} via {protocol}")
@@ -235,9 +201,4 @@ if __name__ == '__main__':
     logging.basicConfig(filemode='w', filename='firewall.log', level=logging.INFO)
 
     sim = FirewallSim()
-
-    logging.info("Starting firewall simulation...")
     sim.run()
-    logging.info("Ending firewall simulation")
-
-    pass
